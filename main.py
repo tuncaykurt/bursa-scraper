@@ -246,20 +246,13 @@ def test_proxy_connectivity(proxy_config, max_retries=3, retry_delay=2):
     if not proxy_config or not proxy_config.get('server'):
         return True, "No proxy configured", None
 
+    # New format has auth embedded in URL
+    proxy_url = proxy_config['server']
+    
     proxies = {
-        'http': proxy_config['server'],
-        'https': proxy_config['server']
+        'http': proxy_url,
+        'https': proxy_url
     }
-
-    # Add authentication if provided
-    if proxy_config.get('username') and proxy_config.get('password'):
-        import urllib.parse
-        parsed = urllib.parse.urlparse(proxy_config['server'])
-        auth_server = f"{parsed.scheme}://{proxy_config['username']}:{proxy_config['password']}@{parsed.netloc}"
-        proxies = {
-            'http': auth_server,
-            'https': auth_server
-        }
 
     # Retry loop for proxy connection
     for attempt in range(1, max_retries + 1):
