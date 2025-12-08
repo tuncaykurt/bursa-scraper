@@ -345,15 +345,38 @@ async def run_scraper(limit=5, proxy=None):
     # Add proxy configuration if provided
     if proxy:
         if proxy.get('server'):
-            browser_options['proxy'] = {
-                'server': proxy['server']
-            }
-
-            if proxy.get('username') and proxy.get('password'):
-                browser_options['proxy']['username'] = proxy['username']
-                browser_options['proxy']['password'] = proxy['password']
-
-            print(f"Camoufox will use proxy: {proxy['server']}")
+            proxy_url = proxy['server']
+            
+            # Parse embedded credentials from URL if present
+            # Format: http://username:password@host:port
+            if '@' in proxy_url:
+                # Extract credentials and server separately
+                import re
+                match = re.match(r'(https?://)([^:]+):([^@]+)@(.+)', proxy_url)
+                if match:
+                    protocol, username, password, server_host = match.groups()
+                    browser_options['proxy'] = {
+                        'server': f"{protocol}{server_host}",
+                        'username': username,
+                        'password': password
+                    }
+                    print(f"Camoufox will use proxy: {protocol}{server_host} (authenticated)")
+                else:
+                    # Fallback: use URL as-is
+                    browser_options['proxy'] = {'server': proxy_url}
+                    print(f"Camoufox will use proxy: {proxy_url}")
+            else:
+                # No embedded credentials, check for separate username/password
+                browser_options['proxy'] = {
+                    'server': proxy_url
+                }
+                
+                if proxy.get('username') and proxy.get('password'):
+                    browser_options['proxy']['username'] = proxy['username']
+                    browser_options['proxy']['password'] = proxy['password']
+                    print(f"Camoufox will use proxy: {proxy_url} (authenticated)")
+                else:
+                    print(f"Camoufox will use proxy: {proxy_url}")
 
     async with AsyncCamoufox(**browser_options) as browser:
         # Create context with Turkish locale
