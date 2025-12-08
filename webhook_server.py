@@ -6,11 +6,9 @@ import os
 import sys
 from main import run_scraper
 
-# LivaProxy Configuration - Türkiye Rotating Proxy
+# LivaProxy Configuration - Residential Rotating Proxy with Turkey location
 PROXY_CONFIG = {
-    "server": "http://45.94.171.52:1080",
-    "username": "EJCXumk9",
-    "password": "iqRvjxOP"
+    "server": "http://EJCXumk9-country-tr-city-mix-residential:iqRvjxOP@rotating.livaproxy.com:1080"
 }
 
 app = FastAPI(title="Bursa Real Estate Scraper API")
@@ -37,9 +35,9 @@ async def scrape_webhook_get(limit: int = 20):
         if limit > 50:
             raise HTTPException(status_code=400, detail="Limit cannot exceed 50")
         
-        print(f"Webhook received - scraping {limit} listings from BURSA (all listings) with TR proxy")
+        print(f"Webhook received - scraping {limit} listings from BURSA with TR proxy")
         
-        # Run scraper with proxy
+        # Run scraper with proxy (after IP whitelist)
         listings = await run_scraper(limit=limit, proxy=PROXY_CONFIG)
         
         return JSONResponse(content={
@@ -84,9 +82,9 @@ async def scrape_webhook_post(request: ScrapeRequest):
         if request.limit > 50:
             raise HTTPException(status_code=400, detail="Limit cannot exceed 50")
         
-        print(f"Webhook received - scraping {request.limit} listings from BURSA (all listings) with TR proxy")
+        print(f"Webhook received - scraping {request.limit} listings from BURSA with TR proxy")
         
-        # Run scraper with proxy
+        # Run scraper with proxy (after IP whitelist)
         listings = await run_scraper(limit=request.limit, proxy=PROXY_CONFIG)
         
         return JSONResponse(content={
