@@ -340,11 +340,11 @@ async def run_scraper(limit=5, proxy=None):
             if country_info:
                 print(f"🌍 Proxy Location: {country_info}")
 
-    # Prepare browser options
+    # Prepare browser options with better fingerprinting
     browser_options = {
         'headless': True,
         'geoip': True,
-        'humanize': False,
+        'humanize': True,  # Changed to True for better behavior
         'i_know_what_im_doing': True,
         'config': {'forceScopeAccess': True},
         'disable_coop': True,
@@ -368,7 +368,15 @@ async def run_scraper(limit=5, proxy=None):
             print(f"Camoufox will use proxy: {proxy['server']}")
 
     async with AsyncCamoufox(**browser_options) as browser:
-        page = await browser.new_page()
+        # Create context with Turkish locale
+        context = await browser.new_context(
+            viewport={'width': 1920, 'height': 1080},
+            locale='tr-TR',
+            timezone_id='Europe/Istanbul',
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        )
+        
+        page = await context.new_page()
 
         # Simple Bursa URL - NO FILTERS
         bursa_url = "https://www.sahibinden.com/satilik-daire/bursa"
@@ -376,26 +384,44 @@ async def run_scraper(limit=5, proxy=None):
         print(f"\n🔍 Scraping ALL listings from Bursa: {bursa_url}\n")
 
         # Navigate to Bursa listings page
-        await page.goto(bursa_url)
+        await page.goto(bursa_url, wait_until='networkidle')
+        print(f"📍 Navigated to: {page.url}")
 
-        # Handle captcha
+        # Handle captcha with increased wait times
         max_captcha_attempts = 3
         for attempt in range(max_captcha_attempts):
             success = await solve_captcha(page, captcha_type='cloudflare', challenge_type='interstitial')
 
             if success:
-                await page.wait_for_timeout(5000)
+                print("✅ Cloudflare captcha solved, waiting for page to load...")
+                await page.wait_for_timeout(15000)  # Increased from 5000 to 15000
+
+                # Check current URL
+                current_url = page.url
+                print(f"📍 Current URL after captcha: {current_url}")
+                
+                # If redirected to login, try to go back to listings
+                if 'login' in current_url:
+                    print("⚠️  Redirected to login page, attempting to navigate back...")
+                    await page.goto(bursa_url, wait_until='networkidle')
+                    await page.wait_for_timeout(5000)
+                    current_url = page.url
+                    print(f"📍 URL after navigation: {current_url}")
 
                 try:
                     await page.wait_for_selector("#searchResultsTable", timeout=10000)
+                    print("✅ Search results table found!")
                     break
                 except:
+                    print("⚠️  Search results table not found yet, continuing...")
                     continue
             else:
                 if attempt < max_captcha_attempts - 1:
+                    print(f"⚠️  Captcha attempt {attempt + 1} failed, retrying...")
                     await page.wait_for_timeout(2000)
                     continue
                 else:
+                    print("⚠️  All captcha attempts exhausted, waiting longer...")
                     await page.wait_for_timeout(30000)
                     break
 
@@ -403,6 +429,14 @@ async def run_scraper(limit=5, proxy=None):
         try:
             # Wait for the search results table to load
             print("⏳ Waiting for search results table...")
+            
+            # Check if we're still on login page
+            current_url = page.url
+            if 'login' in current_url:
+                print(f"❌ Still on login page: {current_url}")
+                print("⚠️  Sahibinden.com requires authentication from your location/IP")
+                return []
+            
             await page.wait_for_selector("#searchResultsTable > tbody", timeout=30000)
             print("✅ Search results table loaded")
 
