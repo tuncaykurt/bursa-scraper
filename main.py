@@ -13,7 +13,7 @@ def print_banner():
     banner = """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                          🏠 SAHIBINDEN SCRAPER 🏠                           ║
-║                        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━                            ║
+║                        ━━━━━━━━━━━━━━━━━━━━━━━━━━━                            ║
 ║                    Powered by Camoufox & Claude Code                        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
     """
@@ -96,7 +96,7 @@ async def scrape_listing_details(page, listing_url):
     try:
         # Increased timeout for proxy
         await page.goto(listing_url, timeout=60000)
-        await page.wait_for_timeout(1500)  # Slightly reduced wait time
+        await page.wait_for_timeout(1500)
 
         # Extract all the required information using the selectors
         title_element = await page.query_selector("#classifiedDetail > div.classifiedDetail > div.classifiedDetailTitle > h1")
@@ -121,10 +121,8 @@ async def scrape_listing_details(page, listing_url):
         desc_element = await page.query_selector("#classifiedDescription")
         description = "N/A"
         if desc_element:
-            # Get all text content and clean it up
             description_text = await desc_element.text_content()
             if description_text:
-                # Clean up the text: remove extra whitespace, newlines, etc.
                 description = " ".join(description_text.strip().split())
             else:
                 description = "N/A"
@@ -148,7 +146,6 @@ async def scrape_listing_details(page, listing_url):
                 if style_element:
                     style_content = await style_element.text_content()
                     if style_content and 'content:' in style_content:
-                        # Extract content between quotes
                         match = re.search(
                             r'content:\s*["\']([^"\']+)["\']', style_content)
                         if match:
@@ -267,13 +264,11 @@ def test_proxy_connectivity(proxy_config, max_retries=3, retry_delay=2):
     # Retry loop for proxy connection
     for attempt in range(1, max_retries + 1):
         try:
-            # Test with a simple HTTP request and get IP
             response = requests.get('http://httpbin.org/ip',
                                     proxies=proxies, timeout=10)
             if response.status_code == 200:
                 proxy_ip = response.json().get('origin', 'Unknown')
 
-                # Get country information from ip-api.com
                 try:
                     geo_response = requests.get(
                         f'http://ip-api.com/json/{proxy_ip}', timeout=10)
@@ -345,7 +340,7 @@ async def run_scraper(limit=5, proxy=None):
             if country_info:
                 print(f"🌍 Proxy Location: {country_info}")
 
-    # Prepare browser options - keep stable for captcha solving
+    # Prepare browser options
     browser_options = {
         'headless': True,
         'geoip': True,
@@ -366,7 +361,6 @@ async def run_scraper(limit=5, proxy=None):
                 'server': proxy['server']
             }
 
-            # Add authentication if provided
             if proxy.get('username') and proxy.get('password'):
                 browser_options['proxy']['username'] = proxy['username']
                 browser_options['proxy']['password'] = proxy['password']
@@ -376,7 +370,7 @@ async def run_scraper(limit=5, proxy=None):
     async with AsyncCamoufox(**browser_options) as browser:
         page = await browser.new_page()
 
-        # Simple Bursa URL - NO FILTERS (all listings from Bursa)
+        # Simple Bursa URL - NO FILTERS
         bursa_url = "https://www.sahibinden.com/satilik-daire/bursa"
         
         print(f"\n🔍 Scraping ALL listings from Bursa: {bursa_url}\n")
@@ -384,16 +378,14 @@ async def run_scraper(limit=5, proxy=None):
         # Navigate to Bursa listings page
         await page.goto(bursa_url)
 
-        # Handle multiple captcha attempts
+        # Handle captcha
         max_captcha_attempts = 3
         for attempt in range(max_captcha_attempts):
-            # Try to solve captcha
             success = await solve_captcha(page, captcha_type='cloudflare', challenge_type='interstitial')
 
             if success:
                 await page.wait_for_timeout(5000)
 
-                # Check if we're on the actual listings page or still on captcha
                 try:
                     await page.wait_for_selector("#searchResultsTable", timeout=10000)
                     break
@@ -407,45 +399,54 @@ async def run_scraper(limit=5, proxy=None):
                     await page.wait_for_timeout(30000)
                     break
 
-        # Find all listing links using the selector from SELECTORS.md
+        # Find all listing links - UPDATED SELECTOR
         try:
             # Wait for the search results table to load
             await page.wait_for_selector("#searchResultsTable > tbody", timeout=30000)
 
-            # Get all listing links
-            listing_links = await page.query_selector_all("td.searchResultsTitleValue > a.classifiedTitle")
+            # Get all listing rows - FIXED SELECTOR
+            listing_rows = await page.query_selector_all("tr.searchResultsItem")
 
-            if not listing_links:
+            if not listing_rows:
+                print("⚠️  No listing rows found!")
                 return []
+
+            print(f"✅ Found {len(listing_rows)} total listings on page")
 
             # Extract href attributes from the links
             listing_urls = []
-            # Limit based on the parameter
-            for link in listing_links[:limit]:
-                href = await link.get_attribute("href")
-                if href:
-                    full_url = urllib.parse.urljoin(
-                        "https://www.sahibinden.com", href)
-                    listing_urls.append(full_url)
+            for row in listing_rows[:limit]:
+                link = await row.query_selector("td.searchResultsTitleValue a")
+                if link:
+                    href = await link.get_attribute("href")
+                    if href:
+                        full_url = urllib.parse.urljoin("https://www.sahibinden.com", href)
+                        listing_urls.append(full_url)
 
-            # Scrape each listing sequentially (more stable)
-            for listing_url in listing_urls:
+            print(f"✅ Will scrape {len(listing_urls)} listings")
+
+            # Scrape each listing sequentially
+            for i, listing_url in enumerate(listing_urls, 1):
+                print(f"🔄 Scraping {i}/{len(listing_urls)}: {listing_url}")
                 listing_data = await scrape_listing_details(page, listing_url)
 
                 if listing_data:
                     scraped_listings.append(listing_data)
+                    print(f"✅ Successfully scraped listing {i}")
+                else:
+                    print(f"❌ Failed to scrape listing {i}")
 
                 # Small delay between requests
-                await page.wait_for_timeout(1000)  # Reduced from 2000
+                await page.wait_for_timeout(1000)
 
-        except Exception:
+        except Exception as e:
+            print(f"❌ Error finding listings: {str(e)}")
             return []
 
-    # Calculate and print statistics
+    # Calculate statistics
     end_time = time.time()
     total_time = end_time - start_time
 
-    # Calculate total data size (approximate JSON size)
     import json
     total_data_bytes = len(json.dumps(scraped_listings).encode('utf-8'))
     total_data_kb = total_data_bytes / 1024
@@ -455,20 +456,16 @@ async def run_scraper(limit=5, proxy=None):
     print(f"\n{'='*80}")
     print(f"✅ Scraping completed successfully!")
     print(f"📊 Total listings scraped: {len(scraped_listings)}")
-    print(
-        f"⏱️  Time spent: {total_time:.2f} seconds ({total_time/60:.2f} minutes)")
+    print(f"⏱️  Time spent: {total_time:.2f} seconds ({total_time/60:.2f} minutes)")
 
     if total_data_mb >= 1:
-        print(
-            f"💾 Data consumed: {total_data_mb:.2f} MB ({total_data_kb:.2f} KB)")
+        print(f"💾 Data consumed: {total_data_mb:.2f} MB ({total_data_kb:.2f} KB)")
     else:
-        print(
-            f"💾 Data consumed: {total_data_kb:.2f} KB ({total_data_bytes} bytes)")
+        print(f"💾 Data consumed: {total_data_kb:.2f} KB ({total_data_bytes} bytes)")
 
     if len(scraped_listings) > 0:
         avg_time_per_listing = total_time / len(scraped_listings)
-        print(
-            f"⚡ Average time per listing: {avg_time_per_listing:.2f} seconds")
+        print(f"⚡ Average time per listing: {avg_time_per_listing:.2f} seconds")
 
     print(f"{'='*80}\n")
 
