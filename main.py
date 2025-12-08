@@ -399,17 +399,79 @@ async def run_scraper(limit=5, proxy=None):
                     await page.wait_for_timeout(30000)
                     break
 
-        # Find all listing links - UPDATED SELECTOR
-        try:
-            # Wait for the search results table to load
-            await page.wait_for_selector("#searchResultsTable > tbody", timeout=30000)
+       # Find all listing links - UPDATED SELECTOR WITH DEBUG
+try:
+    # Wait for the search results table to load
+    print("⏳ Waiting for search results table...")
+    await page.wait_for_selector("#searchResultsTable > tbody", timeout=30000)
+    print("✅ Search results table loaded")
 
-            # Get all listing rows - FIXED SELECTOR
-            listing_rows = await page.query_selector_all("tr.searchResultsItem")
+    # Get all listing rows - FIXED SELECTOR
+    print("🔍 Looking for listing rows...")
+    listing_rows = await page.query_selector_all("tr.searchResultsItem")
 
-            if not listing_rows:
-                print("⚠️  No listing rows found!")
-                return []
+    if not listing_rows:
+        print("⚠️  No listing rows found!")
+        
+        # DEBUG: Let's see what's on the page
+        page_html = await page.content()
+        print(f"📄 Page HTML length: {len(page_html)} characters")
+        print(f"📄 First 1000 chars: {page_html[:1000]}")
+        
+        # Try alternative selectors
+        print("🔍 Trying alternative selectors...")
+        alt_rows = await page.query_selector_all("tr[data-id]")
+        print(f"📊 Found {len(alt_rows)} rows with data-id attribute")
+        
+        alt_rows2 = await page.query_selector_all(".searchResultsItem")
+        print(f"📊 Found {len(alt_rows2)} rows with searchResultsItem class")
+        
+        return []
+
+    print(f"✅ Found {len(listing_rows)} total listings on page")
+
+    # Extract href attributes from the links
+    listing_urls = []
+    for row in listing_rows[:limit]:
+        link = await row.query_selector("td.searchResultsTitleValue a")
+        if link:
+            href = await link.get_attribute("href")
+            if href:
+                full_url = urllib.parse.urljoin("https://www.sahibinden.com", href)
+                listing_urls.append(full_url)
+
+    print(f"✅ Will scrape {len(listing_urls)} listings")
+
+    # Scrape each listing sequentially
+    for i, listing_url in enumerate(listing_urls, 1):
+        print(f"🔄 Scraping {i}/{len(listing_urls)}: {listing_url}")
+        listing_data = await scrape_listing_details(page, listing_url)
+
+        if listing_data:
+            scraped_listings.append(listing_data)
+            print(f"✅ Successfully scraped listing {i}")
+        else:
+            print(f"❌ Failed to scrape listing {i}")
+
+        # Small delay between requests
+        await page.wait_for_timeout(1000)
+
+except Exception as e:
+    print(f"❌ CRITICAL ERROR: {str(e)}")
+    import traceback
+    print(f"📋 Full traceback:")
+    print(traceback.format_exc())
+    
+    # Try to get page info
+    try:
+        page_url = page.url
+        print(f"🌐 Current URL: {page_url}")
+        page_html = await page.content()
+        print(f"📄 Page HTML length: {len(page_html)} characters")
+    except:
+        pass
+        
+    return []
 
             print(f"✅ Found {len(listing_rows)} total listings on page")
 
