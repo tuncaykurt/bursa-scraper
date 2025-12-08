@@ -14,7 +14,7 @@ COPY webhook_server.py ./
 
 # Install Python dependencies directly with pip
 RUN pip install --no-cache-dir \
-    camoufox>=0.4.8 \
+    camoufox[geoip]>=0.4.8 \
     camoufox-captcha>=0.1.2 \
     fastapi>=0.115.5 \
     requests>=2.32.3 \
