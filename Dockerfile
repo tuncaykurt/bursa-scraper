@@ -43,7 +43,7 @@ RUN pip install --no-cache-dir \
     uvicorn>=0.32.1
 
 # Pre-install Camoufox browser to avoid runtime issues
-RUN python -c "from camoufox import Camoufox; Camoufox(headless=True).close()"
+RUN python -c "import asyncio; from camoufox import AsyncCamoufox; asyncio.run(AsyncCamoufox(headless=True).start())"
 
 # Expose port
 EXPOSE 6090
