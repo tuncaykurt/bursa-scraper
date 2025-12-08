@@ -324,14 +324,9 @@ async def run_scraper(limit=5, proxy=None):
 
     # Test proxy connectivity if proxy is provided
     if proxy:
-        print(f"Testing proxy connectivity for {proxy.get('server')}...")
-        is_working, message, country_info = test_proxy_connectivity(proxy)
-        if not is_working:
-            raise Exception(f"Proxy validation failed: {message}")
-        else:
-            print(f"Proxy test successful: {message}")
-            if country_info:
-                print(f"🌍 Proxy Location: {country_info}")
+        print(f"🌐 Using proxy: {proxy.get('server')}")
+        print("⚠️  Skipping proxy validation - will test during scraping")
+        # Skip validation, let Playwright/Camoufox handle it
 
     # Prepare browser options with better fingerprinting
     browser_options = {
