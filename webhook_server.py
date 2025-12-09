@@ -1,121 +1,135 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-import uvicorn
+from typing import Optional
+import asyncio
 import os
-import sys
 from main import run_scraper
+import logging
 
-# LivaProxy Configuration - Residential Rotating Proxy with Turkey location
-PROXY_CONFIG = {
-    "server": "http://EJCXumk9-country-tr-city-mix-residential:iqRvjxOP@rotating.livaproxy.com:1080"
-}
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Bursa Real Estate Scraper API")
+app = FastAPI(title="Sahibinden Scraper Webhook", version="1.0.0")
 
-# Request model for POST endpoint
+
+class ProxyConfig(BaseModel):
+    server: str
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+
 class ScrapeRequest(BaseModel):
-    limit: int = 20
+    limit: Optional[int] = None
+    proxy: Optional[ProxyConfig] = None
+
+
+@app.get("/webhook/scrape")
+async def trigger_scrape_get(limit: int = None):
+    """
+    GET endpoint to trigger scraping (backwards compatibility)
+    """
+    return await trigger_scrape_logic(limit=limit, proxy=None)
+
+
+@app.post("/webhook/scrape")
+async def trigger_scrape_post(request: ScrapeRequest):
+    """
+    POST endpoint to trigger scraping with proxy support
+    """
+    proxy_dict = None
+    if request.proxy:
+        proxy_dict = request.proxy.model_dump()
+
+    return await trigger_scrape_logic(limit=request.limit, proxy=proxy_dict)
+
+
+async def trigger_scrape_logic(limit: int = None, proxy: dict = None):
+    """
+    Common logic for both GET and POST endpoints
+    """
+    try:
+        # Get default values from environment or use hardcoded defaults
+        default_limit = int(os.getenv("DEFAULT_LIMIT", 5))
+        max_limit = int(os.getenv("MAX_LIMIT", 20))
+
+        # Use default if limit not provided
+        if limit is None:
+            limit = default_limit
+
+        # Ensure limit is between 1 and max_limit
+        limit = min(max(limit, 1), max_limit)
+
+        proxy_info = ""
+        if proxy and proxy.get('server'):
+            proxy_info = f" with proxy {proxy['server']}"
+
+        logger.info(f"Webhook received - starting scraper with limit {limit}{proxy_info}")
+        listings = await run_scraper(limit, proxy)
+
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "success",
+                "count": len(listings),
+                "listings": listings
+            }
+        )
+    except Exception as e:
+        error_msg = str(e)
+
+        # Provide more specific error messages for common proxy issues
+        if "Proxy validation failed" in error_msg:
+            logger.error(f"Proxy validation error: {error_msg}")
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "error",
+                    "error_type": "proxy_validation_failed",
+                    "message": error_msg,
+                    "suggestion": "Check if your proxy server is running and accessible. Verify the proxy URL format and credentials."
+                }
+            )
+        elif "NS_ERROR_PROXY_BAD_GATEWAY" in error_msg:
+            logger.error(f"Proxy gateway error: {error_msg}")
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "error",
+                    "error_type": "proxy_bad_gateway",
+                    "message": "The proxy server returned a bad gateway error",
+                    "suggestion": "The proxy server may be down, overloaded, or misconfigured. Try a different proxy server."
+                }
+            )
+        elif "proxy" in error_msg.lower():
+            logger.error(f"Proxy-related error: {error_msg}")
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "error",
+                    "error_type": "proxy_error",
+                    "message": error_msg,
+                    "suggestion": "Check your proxy configuration. Ensure the proxy server supports the required protocol (HTTP/SOCKS5)."
+                }
+            )
+        else:
+            logger.error(f"General scraping error: {error_msg}")
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "status": "error",
+                    "error_type": "scraping_error",
+                    "message": f"Failed to run scraper: {error_msg}"
+                }
+            )
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
     return {"status": "healthy"}
 
-@app.get("/webhook/scrape")
-async def scrape_webhook_get(limit: int = 20):
-    """
-    Webhook endpoint (GET) to trigger scraping
-    Query parameter: limit (default: 20, max: 50)
-    """
-    try:
-        # Validate limit
-        if limit < 1:
-            raise HTTPException(status_code=400, detail="Limit must be at least 1")
-        if limit > 50:
-            raise HTTPException(status_code=400, detail="Limit cannot exceed 50")
-        
-        print(f"Webhook received - scraping {limit} listings from BURSA with TR residential proxy")
-        
-        # Run scraper with proxy (fixed test function)
-        listings = await run_scraper(limit=limit, proxy=PROXY_CONFIG)
-        
-        return JSONResponse(content={
-            "status": "success",
-            "count": len(listings),
-            "listings": listings
-        })
-    
-    except Exception as e:
-        error_message = str(e)
-        print(f"Error in webhook: {error_message}")
-        
-        # Check if it's a proxy-related error
-        if "Proxy" in error_message or "proxy" in error_message:
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "status": "error",
-                    "message": "Proxy connection failed. Please check proxy configuration.",
-                    "details": error_message
-                }
-            )
-        
-        return JSONResponse(
-            status_code=500,
-            content={
-                "status": "error",
-                "message": error_message
-            }
-        )
-
-@app.post("/webhook/scrape")
-async def scrape_webhook_post(request: ScrapeRequest):
-    """
-    Webhook endpoint (POST) to trigger scraping
-    Request body: {"limit": 20}
-    """
-    try:
-        # Validate limit
-        if request.limit < 1:
-            raise HTTPException(status_code=400, detail="Limit must be at least 1")
-        if request.limit > 50:
-            raise HTTPException(status_code=400, detail="Limit cannot exceed 50")
-        
-        print(f"Webhook received - scraping {request.limit} listings from BURSA with TR residential proxy")
-        
-        # Run scraper with proxy (fixed test function)
-        listings = await run_scraper(limit=request.limit, proxy=PROXY_CONFIG)
-        
-        return JSONResponse(content={
-            "status": "success",
-            "count": len(listings),
-            "listings": listings
-        })
-    
-    except Exception as e:
-        error_message = str(e)
-        print(f"Error in webhook: {error_message}")
-        
-        # Check if it's a proxy-related error
-        if "Proxy" in error_message or "proxy" in error_message:
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "status": "error",
-                    "message": "Proxy connection failed. Please check proxy configuration.",
-                    "details": error_message
-                }
-            )
-        
-        return JSONResponse(
-            status_code=500,
-            content={
-                "status": "error",
-                "message": error_message
-            }
-        )
-
 if __name__ == "__main__":
+    import uvicorn
+
     port = int(os.getenv("PORT", 6090))
     uvicorn.run(app, host="0.0.0.0", port=port)
