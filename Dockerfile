@@ -1,52 +1,59 @@
-FROM python:3.11-slim
+# Use Python 3.13 slim image
+FROM python:3.13-slim
 
-WORKDIR /app
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
 
-# Install system dependencies for Camoufox/Firefox
+# Install system dependencies required for Camoufox
 RUN apt-get update && apt-get install -y \
     wget \
+    curl \
     gnupg \
     ca-certificates \
     fonts-liberation \
+    libappindicator3-1 \
     libasound2 \
     libatk-bridge2.0-0 \
     libatk1.0-0 \
     libcups2 \
     libdbus-1-3 \
     libdrm2 \
-    libgbm1 \
     libgtk-3-0 \
     libnspr4 \
     libnss3 \
-    libx11-xcb1 \
-    libxcb1 \
     libxcomposite1 \
     libxdamage1 \
-    libxext6 \
     libxfixes3 \
     libxrandr2 \
-    libxshmfence1 \
+    libxss1 \
     libxtst6 \
+    lsb-release \
     xdg-utils \
+    libgbm1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy project files
-COPY main.py ./
-COPY webhook_server.py ./
+# Create app directory
+WORKDIR /app
 
-# Install Python dependencies with geoip support
-RUN pip install --no-cache-dir \
-    "camoufox[geoip]>=0.4.8" \
-    camoufox-captcha>=0.1.2 \
-    fastapi>=0.115.5 \
-    requests>=2.32.3 \
-    uvicorn>=0.32.1
+# Install uv
+RUN pip install uv
 
-# Pre-install Camoufox browser to avoid runtime issues
-RUN python -c "import asyncio; from camoufox import AsyncCamoufox; asyncio.run(AsyncCamoufox(headless=True).start())"
+# Copy dependency files
+COPY pyproject.toml uv.lock ./
+
+# Install Python dependencies
+RUN uv sync --frozen
+
+# Copy application code
+COPY . .
 
 # Expose port
 EXPOSE 6090
 
-# Run the webhook server
-CMD ["python", "webhook_server.py"]
+# Create non-root user for security
+RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+USER appuser
+
+# Command to run the application
+CMD ["uv", "run", "python", "webhook_server.py"]
