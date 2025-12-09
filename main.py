@@ -13,7 +13,7 @@ def print_banner():
     banner = """
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                          🏠 SAHIBINDEN SCRAPER 🏠                           ║
-║                        ━━━━━━━━━━━━━━━━━━━━━━━━━━━                            ║
+║                        ━━━━━━━━━━━━━━━━━━━━━━━━━━━━                            ║
 ║                    Powered by Camoufox & Claude Code                        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
     """
@@ -96,7 +96,7 @@ async def scrape_listing_details(page, listing_url):
     try:
         # Increased timeout for proxy
         await page.goto(listing_url, timeout=60000)
-        await page.wait_for_timeout(1500)
+        await page.wait_for_timeout(1500)  # Slightly reduced wait time
 
         # Extract all the required information using the selectors
         title_element = await page.query_selector("#classifiedDetail > div.classifiedDetail > div.classifiedDetailTitle > h1")
@@ -121,8 +121,10 @@ async def scrape_listing_details(page, listing_url):
         desc_element = await page.query_selector("#classifiedDescription")
         description = "N/A"
         if desc_element:
+            # Get all text content and clean it up
             description_text = await desc_element.text_content()
             if description_text:
+                # Clean up the text: remove extra whitespace, newlines, etc.
                 description = " ".join(description_text.strip().split())
             else:
                 description = "N/A"
@@ -146,6 +148,7 @@ async def scrape_listing_details(page, listing_url):
                 if style_element:
                     style_content = await style_element.text_content()
                     if style_content and 'content:' in style_content:
+                        # Extract content between quotes
                         match = re.search(
                             r'content:\s*["\']([^"\']+)["\']', style_content)
                         if match:
@@ -246,22 +249,31 @@ def test_proxy_connectivity(proxy_config, max_retries=3, retry_delay=2):
     if not proxy_config or not proxy_config.get('server'):
         return True, "No proxy configured", None
 
-    # New format has auth embedded in URL
-    proxy_url = proxy_config['server']
-    
     proxies = {
-        'http': proxy_url,
-        'https': proxy_url
+        'http': proxy_config['server'],
+        'https': proxy_config['server']
     }
+
+    # Add authentication if provided
+    if proxy_config.get('username') and proxy_config.get('password'):
+        import urllib.parse
+        parsed = urllib.parse.urlparse(proxy_config['server'])
+        auth_server = f"{parsed.scheme}://{proxy_config['username']}:{proxy_config['password']}@{parsed.netloc}"
+        proxies = {
+            'http': auth_server,
+            'https': auth_server
+        }
 
     # Retry loop for proxy connection
     for attempt in range(1, max_retries + 1):
         try:
+            # Test with a simple HTTP request and get IP
             response = requests.get('http://httpbin.org/ip',
                                     proxies=proxies, timeout=10)
             if response.status_code == 200:
                 proxy_ip = response.json().get('origin', 'Unknown')
 
+                # Get country information from ip-api.com
                 try:
                     geo_response = requests.get(
                         f'http://ip-api.com/json/{proxy_ip}', timeout=10)
@@ -310,13 +322,7 @@ def test_proxy_connectivity(proxy_config, max_retries=3, retry_delay=2):
 
 
 async def run_scraper(limit=5, proxy=None):
-    """
-    Main scraping function - scrapes BURSA only, all listings
-    
-    Args:
-        limit: Number of listings to scrape
-        proxy: Proxy configuration (optional)
-    """
+    """Main scraping function that can be called from webhook"""
     scraped_listings = []
 
     # Track start time
@@ -324,15 +330,20 @@ async def run_scraper(limit=5, proxy=None):
 
     # Test proxy connectivity if proxy is provided
     if proxy:
-        print(f"🌐 Using proxy: {proxy.get('server')}")
-        print("⚠️  Skipping proxy validation - will test during scraping")
-        # Skip validation, let Playwright/Camoufox handle it
+        print(f"Testing proxy connectivity for {proxy.get('server')}...")
+        is_working, message, country_info = test_proxy_connectivity(proxy)
+        if not is_working:
+            raise Exception(f"Proxy validation failed: {message}")
+        else:
+            print(f"Proxy test successful: {message}")
+            if country_info:
+                print(f"🌍 Proxy Location: {country_info}")
 
-    # Prepare browser options with better fingerprinting
+    # Prepare browser options - keep stable for captcha solving
     browser_options = {
         'headless': True,
         'geoip': True,
-        'humanize': True,  # Changed to True for better behavior
+        'humanize': False,
         'i_know_what_im_doing': True,
         'config': {'forceScopeAccess': True},
         'disable_coop': True,
@@ -345,183 +356,85 @@ async def run_scraper(limit=5, proxy=None):
     # Add proxy configuration if provided
     if proxy:
         if proxy.get('server'):
-            proxy_url = proxy['server']
-            
-            # Parse embedded credentials from URL if present
-            # Format: http://username:password@host:port
-            if '@' in proxy_url:
-                # Extract credentials and server separately
-                import re
-                match = re.match(r'(https?://)([^:]+):([^@]+)@(.+)', proxy_url)
-                if match:
-                    protocol, username, password, server_host = match.groups()
-                    browser_options['proxy'] = {
-                        'server': f"{protocol}{server_host}",
-                        'username': username,
-                        'password': password
-                    }
-                    print(f"Camoufox will use proxy: {protocol}{server_host} (authenticated)")
-                else:
-                    # Fallback: use URL as-is
-                    browser_options['proxy'] = {'server': proxy_url}
-                    print(f"Camoufox will use proxy: {proxy_url}")
-            else:
-                # No embedded credentials, check for separate username/password
-                browser_options['proxy'] = {
-                    'server': proxy_url
-                }
-                
-                if proxy.get('username') and proxy.get('password'):
-                    browser_options['proxy']['username'] = proxy['username']
-                    browser_options['proxy']['password'] = proxy['password']
-                    print(f"Camoufox will use proxy: {proxy_url} (authenticated)")
-                else:
-                    print(f"Camoufox will use proxy: {proxy_url}")
+            browser_options['proxy'] = {
+                'server': proxy['server']
+            }
+
+            # Add authentication if provided
+            if proxy.get('username') and proxy.get('password'):
+                browser_options['proxy']['username'] = proxy['username']
+                browser_options['proxy']['password'] = proxy['password']
+
+            print(f"Camoufox will use proxy: {proxy['server']}")
 
     async with AsyncCamoufox(**browser_options) as browser:
-        # Create context with Turkish locale
-        context = await browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
-            locale='tr-TR',
-            timezone_id='Europe/Istanbul',
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        )
-        
-        page = await context.new_page()
+        page = await browser.new_page()
 
-        # Simple Bursa URL - NO FILTERS
-        bursa_url = "https://www.sahibinden.com/satilik-daire/bursa"
-        
-        print(f"\n🔍 Scraping ALL listings from Bursa: {bursa_url}\n")
+        # Navigate to the listings page
+        await page.goto("https://www.sahibinden.com/satilik")
 
-        # Navigate to Bursa listings page
-        await page.goto(bursa_url, wait_until='networkidle')
-        print(f"📍 Navigated to: {page.url}")
-
-        # Handle captcha with increased wait times
+        # Handle multiple captcha attempts
         max_captcha_attempts = 3
         for attempt in range(max_captcha_attempts):
+            # Try to solve captcha
             success = await solve_captcha(page, captcha_type='cloudflare', challenge_type='interstitial')
 
             if success:
-                print("✅ Cloudflare captcha solved, waiting for page to load...")
-                await page.wait_for_timeout(15000)  # Increased from 5000 to 15000
+                await page.wait_for_timeout(5000)
 
-                # Check current URL
-                current_url = page.url
-                print(f"📍 Current URL after captcha: {current_url}")
-                
-                # If redirected to login, try to go back to listings
-                if 'login' in current_url:
-                    print("⚠️  Redirected to login page, attempting to navigate back...")
-                    await page.goto(bursa_url, wait_until='networkidle')
-                    await page.wait_for_timeout(5000)
-                    current_url = page.url
-                    print(f"📍 URL after navigation: {current_url}")
-
+                # Check if we're on the actual listings page or still on captcha
                 try:
                     await page.wait_for_selector("#searchResultsTable", timeout=10000)
-                    print("✅ Search results table found!")
                     break
                 except:
-                    print("⚠️  Search results table not found yet, continuing...")
                     continue
             else:
                 if attempt < max_captcha_attempts - 1:
-                    print(f"⚠️  Captcha attempt {attempt + 1} failed, retrying...")
                     await page.wait_for_timeout(2000)
                     continue
                 else:
-                    print("⚠️  All captcha attempts exhausted, waiting longer...")
                     await page.wait_for_timeout(30000)
                     break
 
-        # Find all listing links - UPDATED SELECTOR WITH DEBUG
+        # Find all listing links using the selector from SELECTORS.md
         try:
             # Wait for the search results table to load
-            print("⏳ Waiting for search results table...")
-            
-            # Check if we're still on login page
-            current_url = page.url
-            if 'login' in current_url:
-                print(f"❌ Still on login page: {current_url}")
-                print("⚠️  Sahibinden.com requires authentication from your location/IP")
-                return []
-            
             await page.wait_for_selector("#searchResultsTable > tbody", timeout=30000)
-            print("✅ Search results table loaded")
 
-            # Get all listing rows - FIXED SELECTOR
-            print("🔍 Looking for listing rows...")
-            listing_rows = await page.query_selector_all("tr.searchResultsItem")
+            # Get all listing links
+            listing_links = await page.query_selector_all("td.searchResultsTitleValue > a.classifiedTitle")
 
-            if not listing_rows:
-                print("⚠️  No listing rows found!")
-                
-                # DEBUG: Let's see what's on the page
-                page_html = await page.content()
-                print(f"📄 Page HTML length: {len(page_html)} characters")
-                print(f"📄 First 1000 chars: {page_html[:1000]}")
-                
-                # Try alternative selectors
-                print("🔍 Trying alternative selectors...")
-                alt_rows = await page.query_selector_all("tr[data-id]")
-                print(f"📊 Found {len(alt_rows)} rows with data-id attribute")
-                
-                alt_rows2 = await page.query_selector_all(".searchResultsItem")
-                print(f"📊 Found {len(alt_rows2)} rows with searchResultsItem class")
-                
+            if not listing_links:
                 return []
-
-            print(f"✅ Found {len(listing_rows)} total listings on page")
 
             # Extract href attributes from the links
             listing_urls = []
-            for row in listing_rows[:limit]:
-                link = await row.query_selector("td.searchResultsTitleValue a")
-                if link:
-                    href = await link.get_attribute("href")
-                    if href:
-                        full_url = urllib.parse.urljoin("https://www.sahibinden.com", href)
-                        listing_urls.append(full_url)
+            # Limit based on the parameter
+            for link in listing_links[:limit]:
+                href = await link.get_attribute("href")
+                if href:
+                    full_url = urllib.parse.urljoin(
+                        "https://www.sahibinden.com", href)
+                    listing_urls.append(full_url)
 
-            print(f"✅ Will scrape {len(listing_urls)} listings")
-
-            # Scrape each listing sequentially
-            for i, listing_url in enumerate(listing_urls, 1):
-                print(f"🔄 Scraping {i}/{len(listing_urls)}: {listing_url}")
+            # Scrape each listing sequentially (more stable)
+            for listing_url in listing_urls:
                 listing_data = await scrape_listing_details(page, listing_url)
 
                 if listing_data:
                     scraped_listings.append(listing_data)
-                    print(f"✅ Successfully scraped listing {i}")
-                else:
-                    print(f"❌ Failed to scrape listing {i}")
 
                 # Small delay between requests
-                await page.wait_for_timeout(1000)
+                await page.wait_for_timeout(1000)  # Reduced from 2000
 
-        except Exception as e:
-            print(f"❌ CRITICAL ERROR: {str(e)}")
-            import traceback
-            print(f"📋 Full traceback:")
-            print(traceback.format_exc())
-            
-            # Try to get page info
-            try:
-                page_url = page.url
-                print(f"🌐 Current URL: {page_url}")
-                page_html = await page.content()
-                print(f"📄 Page HTML length: {len(page_html)} characters")
-            except:
-                pass
-                
+        except Exception:
             return []
 
-    # Calculate statistics
+    # Calculate and print statistics
     end_time = time.time()
     total_time = end_time - start_time
 
+    # Calculate total data size (approximate JSON size)
     import json
     total_data_bytes = len(json.dumps(scraped_listings).encode('utf-8'))
     total_data_kb = total_data_bytes / 1024
@@ -531,16 +444,20 @@ async def run_scraper(limit=5, proxy=None):
     print(f"\n{'='*80}")
     print(f"✅ Scraping completed successfully!")
     print(f"📊 Total listings scraped: {len(scraped_listings)}")
-    print(f"⏱️  Time spent: {total_time:.2f} seconds ({total_time/60:.2f} minutes)")
+    print(
+        f"⏱️  Time spent: {total_time:.2f} seconds ({total_time/60:.2f} minutes)")
 
     if total_data_mb >= 1:
-        print(f"💾 Data consumed: {total_data_mb:.2f} MB ({total_data_kb:.2f} KB)")
+        print(
+            f"💾 Data consumed: {total_data_mb:.2f} MB ({total_data_kb:.2f} KB)")
     else:
-        print(f"💾 Data consumed: {total_data_kb:.2f} KB ({total_data_bytes} bytes)")
+        print(
+            f"💾 Data consumed: {total_data_kb:.2f} KB ({total_data_bytes} bytes)")
 
     if len(scraped_listings) > 0:
         avg_time_per_listing = total_time / len(scraped_listings)
-        print(f"⚡ Average time per listing: {avg_time_per_listing:.2f} seconds")
+        print(
+            f"⚡ Average time per listing: {avg_time_per_listing:.2f} seconds")
 
     print(f"{'='*80}\n")
 
