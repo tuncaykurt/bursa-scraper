@@ -2,7 +2,7 @@
 
 ## Information
 
-latest listings url: https://www.sahibinden.com/satilik
+latest listings url: https://www.sahibinden.com/satilik/bursa
 
 example listing url structure: https://www.sahibinden.com/ilan/{listing_title}-{listing_id}/detay
 
