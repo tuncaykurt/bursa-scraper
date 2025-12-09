@@ -1,31 +1,10 @@
-# Python
+# Python-generated files
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-env/
-venv/
-ENV/
+*.py[oc]
 build/
 dist/
-*.egg-info/
+wheels/
+*.egg-info
 
-# Camoufox cache
-.camoufox/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-# Environment variables
-.env
+# Virtual environments
+.venv
