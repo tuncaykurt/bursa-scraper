@@ -371,7 +371,7 @@ async def run_scraper(limit=5, proxy=None):
         page = await browser.new_page()
 
         # Navigate to the BURSA listings page
-        await page.goto("https://www.sahibinden.com/satilik-daire/bursa")
+        await page.goto("https://www.sahibinden.com/satilik/bursa")
 
         # Handle multiple captcha attempts
         max_captcha_attempts = 3
